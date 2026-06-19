@@ -1,7 +1,18 @@
 # Handoff — VoiceCouncil (for Sanjay)
 
-Updated 2026-06-19. All code is written and committed on branch `Sanjay`; what
-remains is deploy/ops, blocked on Insforge org access (see below).
+Updated 2026-06-19. All code is written and on `master`; what remains is
+deploy/ops.
+
+> **Canonical Insforge project: `th7dp9ab` (Sanjay's).** We standardized on it
+> because the full backend is already deployed + verified there and the Vapi
+> assistant points at it. All repo references now use `th7dp9ab`.
+> **Access caveat:** Saad's CLI account only sees `w3gj444d` (his own project) —
+> it canNOT deploy to / set secrets on / read schema for `th7dp9ab`. So every
+> live op below (deploy, secrets, schema check) must run from **Sanjay's**
+> account, OR Sanjay adds Saad to the `th7dp9ab` org.
+> **Verify region:** repo assumes `th7dp9ab` is `us-east` (data host
+> `https://th7dp9ab.us-east.insforge.app`). Sanjay: confirm via
+> `npx @insforge/cli current` and fix the host if it's a different region.
 
 ## TL;DR
 AI interview panel. Three phases: **Prep** (3 Nebius models negotiate who asks what) →
@@ -9,7 +20,7 @@ AI interview panel. Three phases: **Prep** (3 Nebius models negotiate who asks w
 Backend = **Insforge** (NOT Butterbase). Full design in `docs/DESIGN.md`.
 
 ## ✅ Done (code committed on `Sanjay`)
-- **Insforge linked** — project `VoiceCouncil`, host `https://w3gj444d.us-east.insforge.app`.
+- **Canonical project** — `th7dp9ab` (Sanjay's), host `https://th7dp9ab.us-east.insforge.app` (confirm region). The full backend is deployed + verified here.
 - **Schema applied + verified** — `sessions`, `interview_plans`, `scorecards` (`migrations/20260619182530_voicecouncil-core-schema.sql`).
 - **Streaming spike PASSED** — Insforge edge function streams OpenAI-compatible SSE incrementally (no gateway buffering). Approach C confirmed.
 - **`vapi-llm`** — real Nebius streaming proxy (canned loop removed). Strips Vapi-only fields, pipes upstream SSE straight through. `backend/functions/vapi-llm.ts`.
@@ -21,16 +32,16 @@ Backend = **Insforge** (NOT Butterbase). Full design in `docs/DESIGN.md`.
 - **Deploy script** — `backend/deploy.sh` deploys all four functions in one command.
 
 ## ⏳ Next up — deploy/ops only (code is done)
-0. **Unblock Insforge access** (the gate for everything below) — the CLI account
-   must be a member of the project's org. Either Saad adds you, or direct-link
-   with the project API key. Confirm with `npx @insforge/cli current`.
+0. **Who runs these** — `th7dp9ab` is Sanjay's, so Sanjay runs all live ops below.
+   Confirm the link with `npx @insforge/cli current` (should show `th7dp9ab`).
+   If Saad also needs to deploy/operate, Sanjay must add Saad to the `th7dp9ab` org.
 1. **Set secrets** (once): `NEBIUS_API_KEY`, `INSFORGE_PROJECT_URL`, `INSFORGE_API_KEY`
    via `npx @insforge/cli secrets add <NAME> <value>`. Optional vars in `.env.example`.
-   Set `VERDICT_FUNCTION_URL=https://w3gj444d.function2.insforge.app/verdict` so the
+   Set `VERDICT_FUNCTION_URL=https://th7dp9ab.function2.insforge.app/verdict` so the
    webhook auto-starts grading.
 2. **Deploy all functions**: `bash backend/deploy.sh` (or a single slug as an arg).
    Re-run the stream test below — chunks must still arrive incrementally.
-3. **Vapi wiring** — point the assistant's custom-LLM at `https://w3gj444d.function2.insforge.app/vapi-llm`
+3. **Vapi wiring** — point the assistant's custom-LLM at `https://th7dp9ab.function2.insforge.app/vapi-llm`
    and server.url at `…/vapi-webhook`. ⚠️ Vapi appends `/chat/completions` to the
    model URL — make sure the final POST lands on the function. Re-PATCH the assistant
    if the stale "Wellness Partners" first/voicemail messages are still live.
@@ -66,7 +77,7 @@ cd frontend && npm run build                # production build sanity check
 
 ## Verify the streaming spike (after Nebius swap)
 ```bash
-curl -N -s -X POST https://w3gj444d.function2.insforge.app/vapi-llm \
+curl -N -s -X POST https://th7dp9ab.function2.insforge.app/vapi-llm \
   -H "Content-Type: application/json" \
   -d '{"model":"<nebius-model>","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
   | while IFS= read -r l; do [ -n "$l" ] && printf '%s  %s\n' "$(date +%H:%M:%S)" "$l"; done

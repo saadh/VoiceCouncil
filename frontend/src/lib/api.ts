@@ -45,20 +45,63 @@ export async function createSession(input: IntakeInput): Promise<Session> {
 // Phase 1 PREP: run the council "war room" and return the negotiated plan.
 // Real path invokes the Insforge `prep-plan` edge function (3 Nebius models
 // negotiate lanes -> synthesize); mock path returns MOCK_PLAN after a beat.
+//
+// Latency note: the fan-out (3 parallel proposals + a synthesis pass) routinely
+// runs ~30s, which brushes CloudFront's hard ~30s edge timeout — so the invoke's
+// HTTP response is NOT a reliable signal (it can 504 a beat before the function
+// finishes writing the row). We therefore treat the invoke purely as a trigger
+// and poll the `interview_plans` row it upserts — the same poll-the-canonical-row
+// approach `subscribeScorecard` uses for the verdict. The row is the source of
+// truth regardless of whether the edge connection survived.
 export async function generatePlan(sessionId: string): Promise<InterviewPlan> {
   if (MOCK_MODE || !insforge) {
     await wait(1500);
     return MOCK_PLAN;
   }
-  const { data, error } = await insforge.functions.invoke("prep-plan", {
-    body: { session_id: sessionId },
-  });
-  if (error) throw error;
-  return data as InterviewPlan;
+
+  // If a plan already exists (re-entry / double-invoke), return it immediately.
+  const existing = await readPlan(sessionId);
+  if (existing) return existing;
+
+  // Fire the fan-out. Don't await its result for success — a 504/timeout here is
+  // expected when the function outlives the edge timeout; the poll below decides.
+  insforge.functions
+    .invoke("prep-plan", { body: { session_id: sessionId } })
+    .catch(() => {
+      /* edge timeout / transient — the interview_plans poll is canonical */
+    });
+
+  // Poll until the synthesis pass upserts the plan row (or we give up).
+  for (let i = 0; i < 90; i++) {
+    await wait(1000);
+    const plan = await readPlan(sessionId);
+    if (plan) return plan;
+  }
+  throw new Error("Prep timed out — the panel did not return a plan.");
 }
 
-// Phase 3 VERDICT: wait for the synthesized scorecard. Mock path resolves after
-// a delay to simulate the fan-out "conferring" beat. Returns an unsubscribe fn.
+async function readPlan(sessionId: string): Promise<InterviewPlan | null> {
+  if (!insforge) return null;
+  const { data } = await insforge.database
+    .from("interview_plans")
+    .select("plan")
+    .eq("session_id", sessionId)
+    .limit(1);
+  const row = (data as Array<{ plan: InterviewPlan }> | null)?.[0];
+  return row?.plan ?? null;
+}
+
+// Phase 3 VERDICT: fire the grading fan-out, then wait for the synthesized
+// scorecard. Mock path resolves after a delay to simulate the "conferring" beat.
+// Returns an unsubscribe fn.
+//
+// Why the frontend fires verdict (and the webhook does not): all backend
+// functions share one Deno Deploy deployment, so `vapi-webhook` calling the
+// `verdict` function on the same host is rejected as a self-loop (HTTP 508
+// LOOP_DETECTED). The frontend is an external client, so it can invoke verdict
+// cleanly. The webhook's job is just to persist the transcript and flip the
+// session to `grading`; we wait for that signal before triggering, so verdict
+// always grades a real transcript.
 //
 // Delivery note: Insforge realtime is socket.io pub/sub (channels), not a
 // Postgres table-change feed — it only fires if a publisher emits to a channel.
@@ -77,8 +120,11 @@ export function subscribeScorecard(
   }
   let cancelled = false;
   (async () => {
-    // Poll until the verdict fan-out writes the scorecard row.
-    for (let i = 0; i < 60 && !cancelled; i++) {
+    let triggered = false;
+    // Poll loop: (1) return the scorecard as soon as verdict writes it;
+    // (2) once the webhook has persisted the transcript, fire verdict exactly
+    // once. Grading itself runs ~20-30s, so allow a generous window.
+    for (let i = 0; i < 90 && !cancelled; i++) {
       const { data } = await insforge.database
         .from("scorecards")
         .select("scorecard")
@@ -86,13 +132,39 @@ export function subscribeScorecard(
         .limit(1);
       const row = (data as Array<{ scorecard: Scorecard }> | null)?.[0];
       if (row?.scorecard) {
-        onScore(row.scorecard);
+        if (!cancelled) onScore(row.scorecard);
         return;
       }
+
+      if (!triggered && (await transcriptReady(sessionId))) {
+        triggered = true;
+        // Fire-and-forget; the scorecards poll above is the success signal.
+        insforge.functions
+          .invoke("verdict", { body: { session_id: sessionId } })
+          .catch(() => {
+            /* transient — re-fired implicitly by idempotent verdict upsert */
+          });
+      }
+
       await wait(1000);
     }
   })();
   return () => {
     cancelled = true;
   };
+}
+
+// True once the vapi-webhook has written the transcript to the session row
+// (status flips to `grading`). Gating the verdict trigger on this guarantees the
+// fan-out grades a real transcript rather than racing the webhook.
+async function transcriptReady(sessionId: string): Promise<boolean> {
+  if (!insforge) return false;
+  const { data } = await insforge.database
+    .from("sessions")
+    .select("status,transcript")
+    .eq("id", sessionId)
+    .limit(1);
+  const row = (data as Array<{ status?: string; transcript?: unknown }> | null)?.[0];
+  if (!row) return false;
+  return Boolean(row.transcript) || row.status === "grading" || row.status === "done";
 }

@@ -9,7 +9,7 @@
 # Secrets the functions read at runtime (set ONCE, not per deploy):
 #   Required (all functions):
 #     npx @insforge/cli secrets add NEBIUS_API_KEY       <nebius-key>
-#     npx @insforge/cli secrets add INSFORGE_PROJECT_URL <https://w3gj444d.us-east.insforge.app>
+#     npx @insforge/cli secrets add INSFORGE_PROJECT_URL <https://th7dp9ab.us-east.insforge.app>
 #     npx @insforge/cli secrets add INSFORGE_API_KEY     <insforge-api-key>
 #   Optional:
 #     NEBIUS_BASE_URL      default https://api.studio.nebius.ai/v1
@@ -17,7 +17,7 @@
 #     NEBIUS_PANEL_MODELS  csv override for the 3 prep/verdict panel models
 #     NEBIUS_SYNTH_MODEL   synthesis model (defaults to the first panel model)
 #     VAPI_SERVER_SECRET   must match vapi/assistant.json server.secret
-#     VERDICT_FUNCTION_URL https://w3gj444d.function2.insforge.app/verdict
+#     VERDICT_FUNCTION_URL https://th7dp9ab.function2.insforge.app/verdict
 #                          (lets vapi-webhook auto-start grading)
 #
 # Usage:  bash backend/deploy.sh            # deploy everything

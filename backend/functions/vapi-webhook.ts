@@ -5,15 +5,19 @@
 // rebuild it elsewhere). On report we:
 //   1. attach the transcript + vapi_call_id to the session row
 //   2. flip the session to `grading`
-//   3. best-effort kick off the Verdict fan-out (if VERDICT_FUNCTION_URL is set)
+//
+// We do NOT invoke the Verdict function from here. All functions share one Deno
+// Deploy deployment, and a function fetching another on the same host is rejected
+// as a self-loop (HTTP 508 LOOP_DETECTED). The Verdict fan-out is therefore fired
+// by the frontend (an external client) once it sees status `grading` — see
+// subscribeScorecard in frontend/src/lib/api.ts.
 //
 // We ALWAYS ack 200 quickly so Vapi doesn't retry-storm; failures are logged.
 //
 // Secrets (set as Insforge secrets, read via Deno.env):
-//   INSFORGE_PROJECT_URL  e.g. https://w3gj444d.us-east.insforge.app
+//   INSFORGE_PROJECT_URL  e.g. https://th7dp9ab.us-east.insforge.app
 //   INSFORGE_API_KEY      Insforge API key (writes sessions)
 //   VAPI_SERVER_SECRET    optional; if set, must match the x-vapi-secret header
-//   VERDICT_FUNCTION_URL  optional; POSTed { session_id } to start grading
 
 declare const Deno: { env: { get(key: string): string | undefined } };
 
@@ -88,16 +92,18 @@ export default async function (req: Request): Promise<Response> {
       return json({ ok: true, warning: "no sessionId in metadata" }, 200);
     }
 
+    // Persist the transcript and hand off to grading. We do NOT call the Verdict
+    // function from here: all functions share one Deno Deploy deployment, and a
+    // function fetching another function on the same host is rejected as a self-
+    // loop (HTTP 508 LOOP_DETECTED). So the webhook's job ends at persisting the
+    // transcript + flipping status to "grading"; the frontend (an external client,
+    // no loop) fires the Verdict fan-out once it sees this row, then polls the
+    // scorecard — see subscribeScorecard in frontend/src/lib/api.ts.
     await persistSession(sessionId, {
       transcript,
       vapi_call_id: callId ?? null,
       status: "grading",
     });
-
-    // Best-effort: start the Verdict fan-out. Never block the ack on it.
-    triggerVerdict(sessionId).catch((e) =>
-      console.error("[vapi-webhook] verdict trigger failed", e),
-    );
 
     return json({ ok: true, sessionId, lines: lines.length }, 200);
   } catch (e) {
@@ -181,17 +187,6 @@ async function persistSession(
     const detail = await res.text().catch(() => "");
     throw new Error(`session update failed ${res.status}: ${detail}`);
   }
-}
-
-// Optional: notify the Verdict function that a transcript is ready.
-async function triggerVerdict(sessionId: string): Promise<void> {
-  const verdictUrl = Deno.env.get("VERDICT_FUNCTION_URL");
-  if (!verdictUrl) return; // verdict fan-out not wired yet — skip cleanly
-  await fetch(verdictUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId }),
-  });
 }
 
 function cors(): Record<string, string> {
