@@ -55,6 +55,36 @@ function parseAssistantLine(text: string): TranscriptLine {
   return { speaker: "HM", text: text.trim() };
 }
 
+// Coax a readable string out of whatever Vapi hands the error event. Its
+// payloads vary — Error, { message }, { error: { message } }, { errorMsg },
+// nested response bodies, or a bare object — so naive String(e) yields the
+// useless "[object Object]". Walk the common shapes, then fall back to JSON.
+function errorText(e: unknown): string {
+  if (e == null) return "unknown error";
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message || e.name || "error";
+  if (typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const direct =
+      o.message ?? o.errorMsg ?? o.msg ?? o.reason ?? o.statusText;
+    if (typeof direct === "string" && direct) return direct;
+    // One level of nesting (e.g. { error: { message } } or { error: "..." }).
+    const nested = o.error ?? o.data;
+    if (typeof nested === "string" && nested) return nested;
+    if (nested && typeof nested === "object") {
+      const inner = (nested as Record<string, unknown>).message;
+      if (typeof inner === "string" && inner) return inner;
+    }
+    try {
+      const json = JSON.stringify(e);
+      if (json && json !== "{}") return json;
+    } catch {
+      /* circular / non-serializable — fall through */
+    }
+  }
+  return "Call error";
+}
+
 // ---- Real Vapi call -------------------------------------------------------
 
 function startRealInterview(
@@ -70,9 +100,7 @@ function startRealInterview(
     cb.onStatus?.("ended");
   });
   vapi.on("error", (e: unknown) => {
-    const detail =
-      (e as { message?: string } | null)?.message ?? String(e ?? "unknown");
-    cb.onStatus?.("error", detail);
+    cb.onStatus?.("error", errorText(e));
   });
 
   // Vapi streams partial + final transcripts; we only commit finals as lines.
