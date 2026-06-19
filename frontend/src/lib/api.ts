@@ -43,8 +43,8 @@ export async function createSession(input: IntakeInput): Promise<Session> {
 }
 
 // Phase 1 PREP: run the council "war room" and return the negotiated plan.
-// TODO(backend): invoke the Insforge `prep-plan` edge function (3 Nebius models
-// negotiate lanes -> synthesize). For now, return the mock plan after a beat.
+// Real path invokes the Insforge `prep-plan` edge function (3 Nebius models
+// negotiate lanes -> synthesize); mock path returns MOCK_PLAN after a beat.
 export async function generatePlan(sessionId: string): Promise<InterviewPlan> {
   if (MOCK_MODE || !insforge) {
     await wait(1500);
@@ -57,9 +57,16 @@ export async function generatePlan(sessionId: string): Promise<InterviewPlan> {
   return data as InterviewPlan;
 }
 
-// Phase 3 VERDICT: subscribe to the scorecard. Real path uses Insforge realtime
-// on the `scorecards` table; mock path resolves after a delay to simulate the
-// fan-out "conferring" beat. Returns an unsubscribe fn.
+// Phase 3 VERDICT: wait for the synthesized scorecard. Mock path resolves after
+// a delay to simulate the fan-out "conferring" beat. Returns an unsubscribe fn.
+//
+// Delivery note: Insforge realtime is socket.io pub/sub (channels), not a
+// Postgres table-change feed — it only fires if a publisher emits to a channel.
+// The `verdict` function is a single-file Deno function (fetch only, no socket.io
+// client), so it can't publish without breaking standalone deploy. We therefore
+// poll the `scorecards` row that `verdict` upserts — the canonical source of
+// truth. (If a server-side publisher is added later, layer a realtime listener
+// on top of this poll, keeping the poll as the backstop against missed events.)
 export function subscribeScorecard(
   sessionId: string,
   onScore: (s: Scorecard) => void,
@@ -68,11 +75,9 @@ export function subscribeScorecard(
     const t = setTimeout(() => onScore(MOCK_SCORECARD), 3500);
     return () => clearTimeout(t);
   }
-  // TODO(backend): replace with insforge.realtime subscription on `scorecards`
-  // filtered by session_id; call onScore when the row arrives.
   let cancelled = false;
   (async () => {
-    // simple poll fallback until realtime is wired
+    // Poll until the verdict fan-out writes the scorecard row.
     for (let i = 0; i < 60 && !cancelled; i++) {
       const { data } = await insforge.database
         .from("scorecards")
