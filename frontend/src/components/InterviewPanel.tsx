@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PanelAvatars from "./PanelAvatars";
 import { personaByKey } from "../lib/mock";
+import { persistTranscript } from "../lib/api";
 import {
   startInterview,
   VAPI_MOCK_MODE,
@@ -60,8 +61,17 @@ export default function InterviewPanel({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [lines]);
 
-  function handleEnd() {
+  async function handleEnd() {
     callRef.current?.stop();
+    // Write the transcript we collected in-browser before advancing, so the
+    // verdict has something to grade (the Vapi webhook isn't firing for web calls).
+    if (session?.id) {
+      try {
+        await persistTranscript(session.id, lines);
+      } catch {
+        /* best-effort; verdict will report "no transcript" if this failed */
+      }
+    }
     onEnd();
   }
 

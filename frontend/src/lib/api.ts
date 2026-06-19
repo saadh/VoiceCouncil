@@ -2,9 +2,14 @@
 // UI is identical whether or not the backend is wired. TODOs mark where the
 // backend phases (Prep fan-out, Vapi call, Verdict fan-out) plug in.
 
-import { insforge, MOCK_MODE } from "./insforge";
+import { insforge, invokeFunction, MOCK_MODE } from "./insforge";
 import { MOCK_PLAN, MOCK_SCORECARD } from "./mock";
-import type { InterviewPlan, Scorecard, Session } from "./types";
+import type {
+  InterviewPlan,
+  Scorecard,
+  Session,
+  TranscriptLine,
+} from "./types";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const mockId = () => "mock-" + Math.random().toString(36).slice(2, 10);
@@ -65,17 +70,21 @@ export async function generatePlan(sessionId: string): Promise<InterviewPlan> {
 
   // Fire the fan-out. Don't await its result for success — a 504/timeout here is
   // expected when the function outlives the edge timeout; the poll below decides.
-  insforge.functions
-    .invoke("prep-plan", { body: { session_id: sessionId } })
-    .catch(() => {
+  const fire = () =>
+    invokeFunction("prep-plan", { session_id: sessionId }).catch(() => {
       /* edge timeout / transient — the interview_plans poll is canonical */
     });
+  fire();
 
-  // Poll until the synthesis pass upserts the plan row (or we give up).
-  for (let i = 0; i < 90; i++) {
+  // The fan-out runs ~25-40s, right at the ~30s edge timeout, so a cold/slow run
+  // can be KILLED before it persists the row. Re-fire periodically until the row
+  // appears (a warm re-invoke usually completes in ~25s). Idempotent: prep-plan
+  // upserts one row per session.
+  for (let i = 1; i <= 150; i++) {
     await wait(1000);
     const plan = await readPlan(sessionId);
     if (plan) return plan;
+    if (i % 35 === 0) fire(); // retry a dropped / timed-out invoke
   }
   throw new Error("Prep timed out — the panel did not return a plan.");
 }
@@ -89,6 +98,22 @@ async function readPlan(sessionId: string): Promise<InterviewPlan | null> {
     .limit(1);
   const row = (data as Array<{ plan: InterviewPlan }> | null)?.[0];
   return row?.plan ?? null;
+}
+
+// Persist the transcript the interview panel collected in-browser so the verdict
+// can grade it. The Vapi end-of-call webhook is meant to write this, but it isn't
+// firing for web calls — and the frontend already has every line. We write it
+// directly in the shape verdict expects ({ lines, raw }), then trigger grading.
+export async function persistTranscript(
+  sessionId: string,
+  lines: TranscriptLine[],
+): Promise<void> {
+  if (MOCK_MODE || !insforge || lines.length === 0) return;
+  const raw = lines.map((l) => `${l.speaker}: ${l.text}`).join("\n");
+  await insforge.database
+    .from("sessions")
+    .update({ transcript: { lines, raw }, status: "grading" })
+    .eq("id", sessionId);
 }
 
 // Phase 3 VERDICT: wait for the synthesized scorecard. Mock path resolves after
@@ -110,10 +135,17 @@ export function subscribeScorecard(
     return () => clearTimeout(t);
   }
   let cancelled = false;
+  // The webhook triggers `verdict`, but its fan-out runs right at the ~30s edge
+  // timeout and can be killed before writing the scorecard (same race as prep).
+  // Re-fire verdict ourselves as a backstop until the row appears. Idempotent:
+  // verdict upserts one scorecard per session.
+  const fire = () =>
+    invokeFunction("verdict", { session_id: sessionId }).catch(() => {});
+  fire();
   (async () => {
     // Poll until the verdict fan-out writes the scorecard row.
-    for (let i = 0; i < 60 && !cancelled; i++) {
-      const { data } = await insforge.database
+    for (let i = 1; i <= 150 && !cancelled; i++) {
+      const { data } = await insforge!.database
         .from("scorecards")
         .select("scorecard")
         .eq("session_id", sessionId)
@@ -124,6 +156,7 @@ export function subscribeScorecard(
         return;
       }
       await wait(1000);
+      if (i % 35 === 0) fire(); // retry a dropped / timed-out invoke
     }
   })();
   return () => {
