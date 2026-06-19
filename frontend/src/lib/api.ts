@@ -91,8 +91,17 @@ async function readPlan(sessionId: string): Promise<InterviewPlan | null> {
   return row?.plan ?? null;
 }
 
-// Phase 3 VERDICT: wait for the synthesized scorecard. Mock path resolves after
-// a delay to simulate the fan-out "conferring" beat. Returns an unsubscribe fn.
+// Phase 3 VERDICT: fire the grading fan-out, then wait for the synthesized
+// scorecard. Mock path resolves after a delay to simulate the "conferring" beat.
+// Returns an unsubscribe fn.
+//
+// Why the frontend fires verdict (and the webhook does not): all backend
+// functions share one Deno Deploy deployment, so `vapi-webhook` calling the
+// `verdict` function on the same host is rejected as a self-loop (HTTP 508
+// LOOP_DETECTED). The frontend is an external client, so it can invoke verdict
+// cleanly. The webhook's job is just to persist the transcript and flip the
+// session to `grading`; we wait for that signal before triggering, so verdict
+// always grades a real transcript.
 //
 // Delivery note: Insforge realtime is socket.io pub/sub (channels), not a
 // Postgres table-change feed — it only fires if a publisher emits to a channel.
@@ -111,8 +120,11 @@ export function subscribeScorecard(
   }
   let cancelled = false;
   (async () => {
-    // Poll until the verdict fan-out writes the scorecard row.
-    for (let i = 0; i < 60 && !cancelled; i++) {
+    let triggered = false;
+    // Poll loop: (1) return the scorecard as soon as verdict writes it;
+    // (2) once the webhook has persisted the transcript, fire verdict exactly
+    // once. Grading itself runs ~20-30s, so allow a generous window.
+    for (let i = 0; i < 90 && !cancelled; i++) {
       const { data } = await insforge.database
         .from("scorecards")
         .select("scorecard")
@@ -120,13 +132,39 @@ export function subscribeScorecard(
         .limit(1);
       const row = (data as Array<{ scorecard: Scorecard }> | null)?.[0];
       if (row?.scorecard) {
-        onScore(row.scorecard);
+        if (!cancelled) onScore(row.scorecard);
         return;
       }
+
+      if (!triggered && (await transcriptReady(sessionId))) {
+        triggered = true;
+        // Fire-and-forget; the scorecards poll above is the success signal.
+        insforge.functions
+          .invoke("verdict", { body: { session_id: sessionId } })
+          .catch(() => {
+            /* transient — re-fired implicitly by idempotent verdict upsert */
+          });
+      }
+
       await wait(1000);
     }
   })();
   return () => {
     cancelled = true;
   };
+}
+
+// True once the vapi-webhook has written the transcript to the session row
+// (status flips to `grading`). Gating the verdict trigger on this guarantees the
+// fan-out grades a real transcript rather than racing the webhook.
+async function transcriptReady(sessionId: string): Promise<boolean> {
+  if (!insforge) return false;
+  const { data } = await insforge.database
+    .from("sessions")
+    .select("status,transcript")
+    .eq("id", sessionId)
+    .limit(1);
+  const row = (data as Array<{ status?: string; transcript?: unknown }> | null)?.[0];
+  if (!row) return false;
+  return Boolean(row.transcript) || row.status === "grading" || row.status === "done";
 }
