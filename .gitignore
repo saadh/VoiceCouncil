@@ -43,3 +43,6 @@ coverage/
 .roo
 .trae
 .windsurf
+
+# TS build cache
+*.tsbuildinfo
