@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+.pnp/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Builds
+dist/
+build/
+.next/
+out/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Misc
+.cache/
+coverage/
