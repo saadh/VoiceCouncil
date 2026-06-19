@@ -191,9 +191,9 @@ function panelModels(): string[] {
   const csv = Deno.env.get("NEBIUS_PANEL_MODELS");
   if (csv) return csv.split(",").map((s) => s.trim()).filter(Boolean);
   return [
-    "meta-llama/Meta-Llama-3.1-70B-Instruct",
-    "Qwen/Qwen2.5-32B-Instruct",
-    "deepseek-ai/DeepSeek-V3",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "Qwen/Qwen3-32B",
+    "google/gemma-3-27b-it",
   ];
 }
 

@@ -6,8 +6,8 @@
   "voicemailMessage": "Hi, this is the VoiceCouncil interview panel. We missed you for your practice interview — please reconnect when you're ready.",
   "model": {
     "provider": "custom-llm",
-    "url": "https://w3gj444d.function2.insforge.app/vapi-llm",
-    "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "url": "https://th7dp9ab.function2.insforge.app/vapi-llm",
+    "model": "meta-llama/Llama-3.3-70B-Instruct",
     "temperature": 0.7,
     "messages": [
       {
@@ -26,7 +26,7 @@
     "voiceId": "Elliot"
   },
   "server": {
-    "url": "https://w3gj444d.function2.insforge.app/vapi-webhook"
+    "url": "https://th7dp9ab.function2.insforge.app/vapi-webhook"
   },
   "serverMessages": ["end-of-call-report", "status-update"],
   "clientMessages": ["transcript", "speech-update", "status-update"],
