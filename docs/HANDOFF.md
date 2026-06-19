@@ -15,7 +15,7 @@ Backend = **Insforge** (NOT Butterbase). Full design in `docs/DESIGN.md`.
 
 ## ⏳ Next up (in priority order)
 1. **Nebius proxy** (Sanjay was on this) — in `backend/functions/vapi-llm.ts`, replace the canned token loop with a real Nebius streaming call.
-   - Set the key as an Insforge secret: `npx @insforge/cli secrets set NEBIUS_API_KEY <key>` (read it in the function via `Deno.env.get("NEBIUS_API_KEY")`).
+   - Set the key as an Insforge secret: `npx @insforge/cli secrets add NEBIUS_API_KEY <key>` (read it in the function via `Deno.env.get("NEBIUS_API_KEY")`). Requires the project to be linked first (`npx @insforge/cli link --project-id <id>`, or direct-link with `--api-base-url`/`--api-key`); the CLI account must be a member of the project's org.
    - Nebius is OpenAI-compatible: base `https://api.studio.nebius.ai/v1`, POST `/chat/completions` with `stream: true`, pipe its SSE straight through.
    - Redeploy: `npx @insforge/cli -y functions deploy vapi-llm --file backend/functions/vapi-llm.ts`.
    - Re-run the stream test (see Verify below) — chunks must still arrive incrementally.

@@ -71,7 +71,11 @@ export default function App() {
           />
         )}
         {phase === "interview" && (
-          <InterviewPanel onEnd={() => setPhase("verdict")} />
+          <InterviewPanel
+            onEnd={() => setPhase("verdict")}
+            session={session}
+            plan={plan}
+          />
         )}
         {phase === "verdict" && (
           <ScorecardView
