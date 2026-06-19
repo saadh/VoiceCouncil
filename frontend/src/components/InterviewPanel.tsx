@@ -1,48 +1,96 @@
 import { useEffect, useRef, useState } from "react";
 import PanelAvatars from "./PanelAvatars";
-import { personaByKey, MOCK_TRANSCRIPT } from "../lib/mock";
-import type { PersonaKey, TranscriptLine } from "../lib/types";
+import { personaByKey } from "../lib/mock";
+import {
+  startInterview,
+  VAPI_MOCK_MODE,
+  type CallStatus,
+  type InterviewCall,
+} from "../lib/vapi";
+import type {
+  InterviewPlan,
+  PersonaKey,
+  Session,
+  TranscriptLine,
+} from "../lib/types";
 
-// Phase 2 LIVE: the voice interview. The Vapi web call mounts here (TODO).
-// For the shell we replay a mock transcript and rotate the active speaker so
-// the panel + live-caption UI is demonstrable before Vapi is wired.
-export default function InterviewPanel({ onEnd }: { onEnd: () => void }) {
+// Phase 2 LIVE: the voice interview.
+// With Vapi keys set this mounts a real web call and renders the live transcript
+// from Vapi events; without keys it falls back to replaying the mock transcript
+// (VAPI_MOCK_MODE). Either way the panel + caption UI is identical.
+export default function InterviewPanel({
+  onEnd,
+  session,
+  plan,
+}: {
+  onEnd: () => void;
+  session?: Session | null;
+  plan?: InterviewPlan | null;
+}) {
   const [lines, setLines] = useState<TranscriptLine[]>([]);
-  const [active, setActive] = useState<PersonaKey | null>("HM");
+  const [active, setActive] = useState<PersonaKey | "CANDIDATE" | null>(null);
+  const [status, setStatus] = useState<CallStatus>("connecting");
+  const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const callRef = useRef<InterviewCall | null>(null);
 
-  // Replay the mock transcript line-by-line.
+  // Start the call on mount, tear it down on unmount.
   useEffect(() => {
-    let i = 0;
-    const id = setInterval(() => {
-      if (i >= MOCK_TRANSCRIPT.length) {
-        clearInterval(id);
-        return;
-      }
-      const line = MOCK_TRANSCRIPT[i];
-      setLines((prev) => [...prev, line]);
-      if (line.speaker !== "CANDIDATE") setActive(line.speaker);
-      i++;
-    }, 1400);
-    return () => clearInterval(id);
+    const call = startInterview(
+      {
+        onLine: (line) => setLines((prev) => [...prev, line]),
+        onActiveSpeaker: (who) => setActive(who),
+        onStatus: (s, detail) => {
+          setStatus(s);
+          if (s === "error") setError(detail ?? "Call error");
+        },
+      },
+      {
+        sessionId: session?.id,
+        variableValues: plan ? planVariables(plan) : undefined,
+      },
+    );
+    callRef.current = call;
+    return () => call.stop();
+    // session/plan are captured once when the live phase begins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [lines]);
 
+  function handleEnd() {
+    callRef.current?.stop();
+    onEnd();
+  }
+
+  const speaking = status === "live";
+
   return (
     <div className="interview">
-      <PanelAvatars active={active} speaking />
+      <PanelAvatars
+        active={active === "CANDIDATE" ? null : active}
+        speaking={speaking}
+      />
 
       <div className="card live-call">
         <div className="live-badge">
-          <span className="live-dot" /> LIVE · voice
+          <span className="live-dot" />{" "}
+          {status === "live"
+            ? "LIVE · voice"
+            : status === "connecting"
+              ? "Connecting…"
+              : status === "ended"
+                ? "Call ended"
+                : "Connection error"}
         </div>
         <p className="muted call-note">
-          Vapi web call mounts here. Talk to the panel; they take turns from the
-          plan and improvise follow-ups.
+          {VAPI_MOCK_MODE
+            ? "Mock mode — replaying a sample interview. Set VITE_VAPI_PUBLIC_KEY and VITE_VAPI_ASSISTANT_ID in .env.local for a live voice call."
+            : "Talk to the panel; they take turns from the plan and improvise follow-ups."}
         </p>
+        {error && <p className="call-error">⚠️ {error}</p>}
       </div>
 
       <div className="card transcript" ref={logRef}>
@@ -51,10 +99,7 @@ export default function InterviewPanel({ onEnd }: { onEnd: () => void }) {
           const isCand = l.speaker === "CANDIDATE";
           const p = isCand ? null : personaByKey(l.speaker);
           return (
-            <div
-              key={i}
-              className={"t-line" + (isCand ? " t-line--me" : "")}
-            >
+            <div key={i} className={"t-line" + (isCand ? " t-line--me" : "")}>
               <span
                 className="t-who"
                 style={{ color: isCand ? "#cbd5e1" : p?.color }}
@@ -67,9 +112,22 @@ export default function InterviewPanel({ onEnd }: { onEnd: () => void }) {
         })}
       </div>
 
-      <button className="btn btn--danger btn--lg" onClick={onEnd}>
+      <button className="btn btn--danger btn--lg" onClick={handleEnd}>
         End interview &amp; get scorecard
       </button>
     </div>
   );
+}
+
+// Flatten the interview plan into Vapi {{variable}} values the assistant prompt
+// can interpolate (kept as strings — Vapi substitutes them verbatim).
+function planVariables(plan: InterviewPlan): Record<string, string> {
+  const lanes = plan.lanes
+    .map((lane) => {
+      const persona = personaByKey(lane.persona)?.title ?? lane.persona;
+      const qs = lane.questions.map((q) => `    - ${q}`).join("\n");
+      return `${persona} (${lane.persona}) — focus: ${lane.focus}\n${qs}`;
+    })
+    .join("\n");
+  return { interviewPlan: lanes };
 }
