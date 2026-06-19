@@ -2,6 +2,8 @@
   "name": "VoiceCouncil — Interview Panel",
   "firstMessage": "[HM] Hi, thanks for joining. I'm Dana, and I've got two colleagues with me on the panel today. To start — tell me about a project you owned end to end.",
   "firstMessageMode": "assistant-speaks-first",
+  "endCallMessage": "That's the end of the interview — thanks for your time. The panel is conferring now, and your scorecard will be ready in a moment.",
+  "voicemailMessage": "Hi, this is the VoiceCouncil interview panel. We missed you for your practice interview — please reconnect when you're ready.",
   "model": {
     "provider": "custom-llm",
     "url": "https://w3gj444d.function2.insforge.app/vapi-llm",
