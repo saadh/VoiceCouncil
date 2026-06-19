@@ -10,7 +10,7 @@
 // We ALWAYS ack 200 quickly so Vapi doesn't retry-storm; failures are logged.
 //
 // Secrets (set as Insforge secrets, read via Deno.env):
-//   INSFORGE_PROJECT_URL  e.g. https://w3gj444d.us-east.insforge.app
+//   INSFORGE_PROJECT_URL  e.g. https://th7dp9ab.us-east.insforge.app
 //   INSFORGE_API_KEY      Insforge API key (writes sessions)
 //   VAPI_SERVER_SECRET    optional; if set, must match the x-vapi-secret header
 //   VERDICT_FUNCTION_URL  optional; POSTed { session_id } to start grading

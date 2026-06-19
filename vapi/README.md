@@ -52,12 +52,12 @@ transcript) — no Vapi account needed to demo the UI.
 ## ⚠️ Custom-LLM path (verify before the demo)
 
 Vapi POSTs to **`{model.url}/chat/completions`**, appending the path. With
-`model.url` = `https://w3gj444d.function2.insforge.app/vapi-llm`, the request
+`model.url` = `https://th7dp9ab.function2.insforge.app/vapi-llm`, the request
 lands at `.../vapi-llm/chat/completions`. Confirm Insforge routes that to the
 `vapi-llm` function (it ignores the path and reads the body). Quick check:
 
 ```bash
-curl -N -s -X POST https://w3gj444d.function2.insforge.app/vapi-llm/chat/completions \
+curl -N -s -X POST https://th7dp9ab.function2.insforge.app/vapi-llm/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"x","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
@@ -80,7 +80,7 @@ Set a shared secret so the webhook can reject forged posts. Add to
 
 ```json
 "server": {
-  "url": "https://w3gj444d.function2.insforge.app/vapi-webhook",
+  "url": "https://th7dp9ab.function2.insforge.app/vapi-webhook",
   "secret": "<random-string>"
 }
 ```
